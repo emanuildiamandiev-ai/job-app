@@ -69,7 +69,18 @@
             </svg>
         );
 
+        const Key = ({ size = 24, className = "" }) => (
+            <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <circle cx="7.5" cy="15.5" r="5.5"/>
+                <path d="m21 2-9.6 9.6"/>
+                <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+            </svg>
+        );
+
         const InterviewAssistant = () => {
+            const [apiKey, setApiKey] = useState('');
+            const [apiKeySet, setApiKeySet] = useState(false);
+            const [showApiInput, setShowApiInput] = useState(true);
             const [isListening, setIsListening] = useState(false);
             const [currentQuestion, setCurrentQuestion] = useState('');
             const [suggestedAnswer, setSuggestedAnswer] = useState('');
@@ -78,6 +89,34 @@
             const [transcript, setTranscript] = useState([]);
             const recognitionRef = useRef(null);
             const silenceTimerRef = useRef(null);
+
+            // Load API key from session on mount
+            useEffect(() => {
+                const savedKey = sessionStorage.getItem('anthropic_api_key');
+                if (savedKey) {
+                    setApiKey(savedKey);
+                    setApiKeySet(true);
+                    setShowApiInput(false);
+                }
+            }, []);
+
+            const saveApiKey = () => {
+                if (apiKey.trim().startsWith('sk-ant-')) {
+                    sessionStorage.setItem('anthropic_api_key', apiKey.trim());
+                    setApiKeySet(true);
+                    setShowApiInput(false);
+                    setError('');
+                } else {
+                    setError('Invalid API key format. It should start with "sk-ant-"');
+                }
+            };
+
+            const clearApiKey = () => {
+                sessionStorage.removeItem('anthropic_api_key');
+                setApiKey('');
+                setApiKeySet(false);
+                setShowApiInput(true);
+            };
 
             // Your professional context
             const cvContext = `
@@ -118,6 +157,8 @@ Based on this context, provide concise, authentic answers that:
 `;
 
             useEffect(() => {
+                if (!apiKeySet) return;
+
                 // Check for browser support
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
                     setError('Speech recognition not supported in this browser. Please use Chrome or Edge.');
@@ -186,7 +227,7 @@ Based on this context, provide concise, authentic answers that:
                         clearTimeout(silenceTimerRef.current);
                     }
                 };
-            }, [isListening]);
+            }, [isListening, apiKeySet]);
 
             const toggleListening = () => {
                 if (!recognitionRef.current) {
@@ -220,6 +261,8 @@ Based on this context, provide concise, authentic answers that:
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
+                            'x-api-key': apiKey,
+                            'anthropic-version': '2023-06-01'
                         },
                         body: JSON.stringify({
                             model: 'claude-sonnet-4-20250514',
@@ -245,7 +288,8 @@ Format the answer as if Emanuil is speaking directly to the interviewer.`
                     });
 
                     if (!response.ok) {
-                        throw new Error(`API error: ${response.status}`);
+                        const errorData = await response.json();
+                        throw new Error(errorData.error?.message || `API error: ${response.status}`);
                     }
 
                     const data = await response.json();
@@ -259,7 +303,7 @@ Format the answer as if Emanuil is speaking directly to the interviewer.`
                     
                 } catch (err) {
                     console.error('Error processing question:', err);
-                    setError('Failed to generate answer. Please try again.');
+                    setError(`Failed to generate answer: ${err.message}. Please check your API key.`);
                 } finally {
                     setIsProcessing(false);
                 }
@@ -285,13 +329,84 @@ Format the answer as if Emanuil is speaking directly to the interviewer.`
                 }
             };
 
+            if (showApiInput) {
+                return (
+                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6 flex items-center justify-center">
+                        <div className="max-w-2xl w-full bg-white rounded-lg shadow-lg p-8">
+                            <div className="flex items-center gap-3 mb-6">
+                                <Key className="text-blue-500" size={32} />
+                                <h1 className="text-3xl font-bold text-gray-800">API Key Required</h1>
+                            </div>
+                            
+                            <div className="mb-6">
+                                <p className="text-gray-600 mb-4">
+                                    To use this AI Interview Assistant, you need an Anthropic API key.
+                                </p>
+                                
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                    <h3 className="font-semibold text-blue-900 mb-2">How to get your API key:</h3>
+                                    <ol className="list-decimal list-inside space-y-2 text-blue-800 text-sm">
+                                        <li>Go to <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" className="underline font-medium">console.anthropic.com</a></li>
+                                        <li>Sign up or log in to your account</li>
+                                        <li>Navigate to "API Keys" in the settings</li>
+                                        <li>Click "Create Key" and copy your API key</li>
+                                        <li>Paste it below (starts with "sk-ant-")</li>
+                                    </ol>
+                                </div>
+
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Anthropic API Key
+                                </label>
+                                <input
+                                    type="password"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    placeholder="sk-ant-..."
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                    onKeyPress={(e) => e.key === 'Enter' && saveApiKey()}
+                                />
+                                
+                                <p className="text-xs text-gray-500 mt-2">
+                                    Your API key is stored only in your browser session and is never sent anywhere except to Anthropic's API.
+                                </p>
+                            </div>
+
+                            {error && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+                                    <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={18} />
+                                    <p className="text-red-700 text-sm">{error}</p>
+                                </div>
+                            )}
+
+                            <button
+                                onClick={saveApiKey}
+                                disabled={!apiKey.trim()}
+                                className="w-full bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition-all"
+                            >
+                                Save API Key & Continue
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
                     <div className="max-w-4xl mx-auto">
                         {/* Header */}
                         <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
-                            <h1 className="text-3xl font-bold text-gray-800 mb-2">AI Interview Assistant</h1>
-                            <p className="text-gray-600">Listen to questions and get AI-powered answers based on your experience</p>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-gray-800 mb-2">AI Interview Assistant</h1>
+                                    <p className="text-gray-600">Listen to questions and get AI-powered answers based on your experience</p>
+                                </div>
+                                <button
+                                    onClick={clearApiKey}
+                                    className="text-sm text-gray-500 hover:text-gray-700 underline"
+                                >
+                                    Change API Key
+                                </button>
+                            </div>
                         </div>
 
                         {/* Controls */}
